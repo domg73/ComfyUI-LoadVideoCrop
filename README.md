@@ -4,6 +4,8 @@ A native ComfyUI node: the official **Load Video**, extended with an aspect-rati
 
 Works with **classic nodes** and **ComfyUI 2.0 (Vue nodes)**.
 
+https://github.com/user-attachments/assets/d2559ddc-d08b-44eb-99eb-eaa7f8b1a6a0
+
 ## Install
 
 Drop the folder into `ComfyUI/custom_nodes/` and restart ComfyUI. No extra dependencies.
