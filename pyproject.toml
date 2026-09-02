@@ -1,0 +1,16 @@
+[project]
+name = "ComfyUI-LoadVideoCrop"
+description = "An extended Load Video node with an aspect-ratio-locked, WYSIWYG crop rectangle that outputs the cropped VIDEO."
+version = "1.0.0"
+license = "MIT"
+
+[project.urls]
+Repository = "https://github.com/domg73/ComfyUI-LoadVideoCrop"
+Documentation = "https://github.com/domg73/ComfyUI-LoadVideoCrop#readme"
+"Bug Tracker" = "https://github.com/domg73/ComfyUI-LoadVideoCrop/issues"
+
+[tool.comfy]
+PublisherId = "domg73"
+DisplayName = "Load Video + Crop"
+Icon = ""
+includes = []
