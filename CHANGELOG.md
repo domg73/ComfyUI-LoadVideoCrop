@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.0.1 (2026-09-04)
+
+- Video-editor-style trim timeline below the preview (outside the crop area):
+  - filmstrip of real frames sampled across the clip (1/s, min 4, max 48), rendered progressively;
+  - audio waveform (decoded loudness envelope) under the filmstrip, skipped for very long clips;
+  - mark-in / mark-out window: two thin (frame-precise) marker lines with a small grip on top; drag a marker to change the in or out point (minimum window 0.05 s); the middle of the window is not draggable;
+  - playhead line following the native playback position in real time;
+  - keyboard `I` / `O` set mark-in / mark-out at the playhead (standard editor convention);
+  - a plain click anywhere on the timeline (including on the blue selection) seeks the native player;
+  - playback is confined to the marks: starting from a time before the mark-in jumps to the mark-in, and reaching the mark-out loops back to the mark-in (unless the mark-out is the end of the clip, in which case it stops naturally); seeking while paused stays free anywhere on the clip;
+  - dragging a marker (IN/OUT) pauses the preview and scrubs it to the marker position, so the frame being marked is visible (editor behavior).
+- The timeline is display-only and reflows as the node is resized (thumbnails stretch, waveform re-samples, marks keep their exact times).
+- The timeline survives aspect-ratio changes and preview re-renders (both designs); the captured assets (thumbnails, waveform) are kept across re-renders of the same file.
+- New `start_time` / `duration` / `strict_duration` inputs (hidden widgets, same semantics as the core Trim Video node) — the trim is stored in the workflow and can be set via API.
+- Changing the video file resets the trim window to the full clip.
+- The trim works in combination with the crop rectangle (both at once, still static across all frames).
+- Fixed: clicking/dragging the crop box no longer triggers the player's click-to-play/pause (the click synthesized at the end of the drag is now absorbed; clicking the video itself still toggles playback as usual).
+- New **💾 Frame** button (top-left of the preview): one click saves the current frame as PNG file(s) **downloaded by the browser** — full frame plus cropped frame at the exact output dimensions (WYSIWYG with the node output); with the Original aspect ratio only the full frame is saved (the cropped copy would be identical); file names carry the source name and timecode; the button briefly shows the outcome (✓ Saved / ⚠ Failed).
+- The node now also outputs the frame the preview is showing as two IMAGE sockets (full + cropped): the exact frame the player displays at `frame_time` (hidden input, kept in sync with the player by the frontend; settable manually to export an arbitrary moment) — the same frame the 💾 Frame button saves (in **Original** the two are identical).
+- Per-file persistence: the crop box and the IN/OUT marks are cached in the browser `localStorage` and restored across multi-tab switches and page reloads, in both the classic and the 2.0 layouts (the frontend resets the hidden FLOAT widgets when it re-instantiates the nodes); a workflow that already carries crop/trim values always wins, and a new file always starts from its own memory (or clean).
+
 ## v1.0.0 (2026-09-02, initial release)
 
 - Node based on the official Load Video: same file picker, drag & drop, and native `<video>` preview.

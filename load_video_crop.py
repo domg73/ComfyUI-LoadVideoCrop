@@ -686,6 +686,10 @@ class LoadVideoCrop(io.ComfyNode):
     The cropped output is a lazy VideoInput: saving it streams frame-by-frame
     from the source file (peak memory ~ one frame, independent of video
     length), while tensor consumers materialize only the cropped region.
+
+    Optional trim (start_time/duration, same semantics as the core Trim Video
+    node): applied via as_trimmed on top of whatever the aspect ratio produced,
+    so Original + trim stays a pure core pass-through. 0 = no trim/unlimited.
     """
 
     @classmethod
@@ -706,25 +710,116 @@ class LoadVideoCrop(io.ComfyNode):
                 io.Float.Input("crop_y", default=0.0, min=0.0, max=1.0, step=0.0001),
                 io.Float.Input("crop_w", default=1.0, min=0.0, max=1.0, step=0.0001),
                 io.Float.Input("crop_h", default=1.0, min=0.0, max=1.0, step=0.0001),
+                io.Float.Input(
+                    "start_time",
+                    default=0.0,
+                    min=-1e5,
+                    max=1e5,
+                    step=0.001,
+                    tooltip="Trim: start time in seconds (negative = from the end; 0 = no trim).",
+                ),
+                io.Float.Input(
+                    "duration",
+                    default=0.0,
+                    min=0.0,
+                    step=0.001,
+                    tooltip="Trim: duration in seconds, or 0 for unlimited duration.",
+                ),
+                io.Boolean.Input(
+                    "strict_duration",
+                    default=False,
+                    tooltip="If True, raise an error when the requested duration cannot be fully satisfied.",
+                ),
+                io.Float.Input(
+                    "frame_time",
+                    default=0.0,
+                    min=0.0,
+                    max=1e5,
+                    step=0.001,
+                    tooltip="Seconds in the file: the frame the preview is showing, output as the two images. Kept in sync by the frontend; set manually to export a specific moment.",
+                ),
             ],
             outputs=[
-                io.Video.Output(),
+                io.Video.Output(display_name="VIDEO"),
+                io.Image.Output(
+                    display_name="FULL FRAME",
+                    tooltip="The frame the preview is showing, full resolution (stable while the player is paused).",
+                ),
+                io.Image.Output(
+                    display_name="CROPPED FRAME",
+                    tooltip="The previewed frame cropped to the aspect-ratio box (identical to the full frame in Original mode).",
+                ),
             ],
         )
 
     @classmethod
-    def execute(cls, file, aspect_ratio, crop_x, crop_y, crop_w, crop_h) -> io.NodeOutput:
+    def execute(cls, file, aspect_ratio, crop_x, crop_y, crop_w, crop_h,
+                start_time, duration, strict_duration, frame_time=0.0) -> io.NodeOutput:
         video_path = folder_paths.get_annotated_filepath(file)
         if aspect_ratio == "Original":
             # Pure pass-through: the exact core Load Video output.
-            return io.NodeOutput(InputImpl.VideoFromFile(video_path))
-        if _core_vt is None:
+            video = InputImpl.VideoFromFile(video_path)
+        elif _core_vt is None:
             # Core moved its private helpers: fall back to the legacy eager
             # path (correct but materializes the full video in RAM).
-            return io.NodeOutput(cls._legacy_eager_video(video_path, crop_x, crop_y, crop_w, crop_h))
-        return io.NodeOutput(
-            LoadVideoCropVideo(video_path, crop_x, crop_y, crop_w, crop_h)
-        )
+            video = cls._legacy_eager_video(video_path, crop_x, crop_y, crop_w, crop_h)
+        else:
+            video = LoadVideoCropVideo(video_path, crop_x, crop_y, crop_w, crop_h)
+
+        # Same trim semantics as the core Trim Video node (VideoSlice).
+        trimmed = video.as_trimmed(start_time, duration, strict_duration=strict_duration)
+        if trimmed is None:
+            raise ValueError(
+                f"Failed to slice video:\nSource duration: {video.get_duration()}\n"
+                f"Start time: {start_time}\nTarget duration: {duration}"
+            )
+        full, cropped = cls._preview_frames(video_path, frame_time, crop_x, crop_y, crop_w, crop_h)
+        return io.NodeOutput(trimmed, full, cropped)
+
+    @staticmethod
+    def _preview_frames(video_path, frame_time, crop_x, crop_y, crop_w, crop_h):
+        """The previewed frame as IMAGE tensors: (full, cropped).
+
+        Decodes the LAST frame with pts <= frame_time - the exact frame the
+        browser player displays at that instant (the same pixels the frame-
+        save button captures). The rectangle is applied in display space
+        (after the rotation metadata), so the output is WYSIWYG with the
+        overlay box and with the saved PNGs."""
+        t = max(0.0, float(frame_time))
+        with av.open(video_path, mode="r") as container:
+            stream = container.streams.video[0]
+            if not stream:
+                raise ValueError("No video stream found in file")
+            dur_s = float(container.duration / av.time_base) if container.duration else 0.0
+            if dur_s > 0:
+                t = min(t, max(0.0, dur_s - 1e-3))
+            target = int(t / stream.time_base)
+            container.seek(target, any_frame=False, backward=True, stream=stream)
+            frame = None
+            for f in container.decode(stream):
+                if f.pts is None:
+                    continue
+                if f.pts > target:
+                    break
+                frame = f
+            if frame is None:  # target before the first decodable frame
+                container.seek(0, any_frame=False, backward=True, stream=stream)
+                frame = next(container.decode(stream))
+            has_alpha = any(c.is_alpha for c in frame.format.components)
+            img = frame.to_ndarray(format="rgba" if has_alpha else "rgb24")
+            rotation = int(frame.rotation or 0)
+        if rotation:
+            k = (-rotation) % 360 // 90
+            img = np.ascontiguousarray(np.rot90(img, k, axes=(0, 1)))
+        full = torch.from_numpy(np.ascontiguousarray(img)).float().div_(255.0).unsqueeze(0)
+        if (crop_x, crop_y, crop_w, crop_h) == (0, 0, 1, 1) or not (
+            crop_w > 0.001 and crop_h > 0.001 and crop_x < 0.999 and crop_y < 0.999
+        ):
+            return full, full
+        H, W = img.shape[0], img.shape[1]
+        x0, y0, x1, y1 = _even_crop_box(crop_x, crop_y, crop_x + crop_w, crop_y + crop_h, W, H)
+        cropped = full[:, y0:y1, x0:x1, :].contiguous()
+        return full, cropped
 
     @staticmethod
     def _legacy_eager_video(video_path, crop_x, crop_y, crop_w, crop_h):
@@ -768,18 +863,22 @@ class LoadVideoCrop(io.ComfyNode):
         return images, alpha
 
     @classmethod
-    def fingerprint_inputs(cls, file, aspect_ratio, crop_x, crop_y, crop_w, crop_h):
+    def fingerprint_inputs(cls, file, aspect_ratio, crop_x, crop_y, crop_w, crop_h,
+                           start_time, duration, strict_duration, frame_time=0.0):
         # file identity via stat (size + mtime) instead of hashing the whole
-        # file, plus the full-precision crop so any change forces a re-run
+        # file, plus the full-precision crop/trim/frame so any change forces
+        # a re-run
         video_path = folder_paths.get_annotated_filepath(file)
         st = os.stat(video_path)
         return (
             f"{st.st_size}|{st.st_mtime_ns}|"
-            f"{aspect_ratio}|{crop_x!r},{crop_y!r},{crop_w!r},{crop_h!r}"
+            f"{aspect_ratio}|{crop_x!r},{crop_y!r},{crop_w!r},{crop_h!r}|"
+            f"{start_time!r},{duration!r},{strict_duration!r},{frame_time!r}"
         )
 
     @classmethod
-    def validate_inputs(cls, file, aspect_ratio=None, crop_x=None, crop_y=None, crop_w=None, crop_h=None):
+    def validate_inputs(cls, file, aspect_ratio=None, crop_x=None, crop_y=None, crop_w=None, crop_h=None,
+                        start_time=None, duration=None, strict_duration=None, frame_time=None):
         if not folder_paths.exists_annotated_filepath(file):
             return "Invalid video file: {}".format(file)
         return True
