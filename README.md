@@ -14,7 +14,7 @@ Drop the folder into `ComfyUI/custom_nodes/` and restart ComfyUI. No extra depen
 
 The node looks and behaves like the official Load Video: same file picker, drag & drop and native `<video>` preview.
 
-- **Aspect Ratio** — default **Original**: the video passes through **uncropped**, no crop area is shown and the node behaves exactly like the official Load Video. The other ratios are locked: `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `9:16`, `16:9`, `21:9`.
+- **Aspect Ratio** — default **Original**: the video passes through **uncropped**, no crop area is shown and the node behaves exactly like the official Load Video. The other ratios are locked: `1:1`, `2:3`, `3:2`, `3:4`, `4:3`, `9:16`, `16:9`, `21:9`. The **Free (Custom)** option lifts the lock: any crop rectangle — in Free mode the four corners of the box show small resize handles (drag one to resize freely, the opposite corner stays fixed), the middle still moves the box, and the wheel zooms it at its drawn ratio.
 - With any locked ratio, a crop rectangle appears on the preview:
   - **Move it**: click and drag the rectangle.
   - **Zoom it**: keep the mouse pointer over the crop area and turn the mouse wheel — wheel up enlarges, wheel down shrinks, always around the pointer. While the pointer is over the crop area the wheel is captured by the crop, so the canvas behind does not pan/zoom; outside it the wheel works normally.
@@ -34,7 +34,7 @@ A video-editor-style timeline sits **below the preview** (outside the crop area)
 - **Playhead**: the white line follows the native player. A click anywhere on the timeline seeks the preview to that time. While the preview plays, the playhead moves in real time and playback is confined to the marks: starting (or seeking) from a time before the mark-in jumps to the mark-in, and when the mark-out is reached the video loops back to the mark-in (unless the mark-out is the end of the clip, in which case it simply stops). Seeking while paused stays free anywhere on the clip.
 - **Keyboard**: with the preview in view, `I` sets the mark-in and `O` sets the mark-out at the current playhead position (standard editor convention).
 - **Reset**: the window resets to the full clip when a different video file is selected.
-- **Persistence**: the crop box and the IN/OUT marks are remembered per file (browser `localStorage`) and are restored across multi-tab switches and page reloads (both the classic and the 2.0 layouts re-instantiate the nodes and reset the hidden widgets). A workflow that already carries crop/trim values always wins, and a new file always starts from its own memory (or clean).
+- **Persistence**: the crop box, the IN/OUT marks and the aspect-ratio selection are remembered per file (browser `localStorage`) and are restored across multi-tab switches and page reloads (both the classic and the 2.0 layouts re-instantiate the nodes and reset the hidden widgets). A workflow that already carries crop/trim values always wins, and a new file always starts from its own memory (or clean).
 
 ### Frame saving
 

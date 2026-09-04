@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.2 (2026-09-04)
+
+- New **Free (Custom)** aspect ratio: a crop rectangle of any shape, not limited to the preset ratios. In Free mode the box keeps the shape you draw:
+  - four small resize handles on the corners — drag one to resize the box freely (the opposite corner stays fixed; minimum size 2% of the frame);
+  - the box still moves by dragging its middle, and the mouse wheel still zooms it (preserving the drawn ratio);
+  - switching to Free keeps the current box (from Original it starts full-frame); switching back to a preset refits that ratio as before.
+- The aspect-ratio selection is now persisted per file in the browser `localStorage` as well (alongside the crop box and the IN/OUT marks), so a Free crop survives a page reload.
+
 ## v1.0.1 (2026-09-04)
 
 - Video-editor-style trim timeline below the preview (outside the crop area):

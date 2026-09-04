@@ -133,8 +133,10 @@ function lsSave(node) {
     const key = lsKeyOfVideo(v);
     if (!key) return;
     const crop = st.crop ? { x: st.crop.x, y: st.crop.y, w: st.crop.w, h: st.crop.h } : null;
+    const arw = widgetOf(node, "aspect_ratio");
     localStorage.setItem(key, JSON.stringify({
       crop,
+      ar: arw ? String(arw.value) : null, // the combo resets to default on reload
       trim: { start: st.trim.start, dur: st.trim.dur },
       ts: Date.now(),
     }));
@@ -168,10 +170,13 @@ function lsLoadForVideo(v) {
   }
 }
 
-function ratioOf(node) {
+/** Aspect-ratio mode: "off" (Original = no crop), "free" (user-drawn box),
+ * or a positive number for the preset "W:H" entries. */
+function arMode(node) {
   const w = widgetOf(node, "aspect_ratio");
   const v = w ? String(w.value) : "Original";
-  if (/^\s*original\b/i.test(v)) return null; // "Original" -> no crop at all
+  if (/^\s*original\b/i.test(v)) return "off"; // "Original" -> no crop at all
+  if (/^\s*free\b/i.test(v)) return "free"; // user-drawn box, any shape
   const m = v.match(/(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)/);
   if (m) {
     const r = parseFloat(m[1]) / parseFloat(m[2]);
@@ -230,23 +235,36 @@ function maxFitRatio(ratio, cw, ch) {
 
 function resetCrop(node, cw, ch) {
   const st = getState(node);
-  const r = ratioOf(node);
-  if (r == null) {
+  const m = arMode(node);
+  if (m === "off") {
     st.crop = null;
+  } else if (m === "free") {
+    // Free keeps the current box (e.g. left over from a preset) or starts
+    // full-frame; the user then shapes it with the corner handles.
+    st.crop = st.crop || { x: 0, y: 0, w: 1, h: 1 };
+    fitCrop(node, st.crop, cw, ch);
   } else {
-    const fr = maxFitRatio(r, cw, ch);
+    const fr = maxFitRatio(m, cw, ch);
     st.crop = { x: (1 - fr.w) / 2, y: (1 - fr.h) / 2, w: fr.w, h: fr.h };
   }
   st.cropFromWorkflow = false;
   writeCrop(node);
 }
 
-/** Clamp crop to content bounds, keeping the ratio (height-driven). */
+/** Clamp crop to content bounds. Presets keep the ratio (height-driven);
+ * Free keeps the drawn shape (min size + bounds only). */
 function fitCrop(node, c, cw, ch) {
-  const r = ratioOf(node);
-  if (r == null) return c;
-  const k = r * (ch / cw);
-  const fr = maxFitRatio(r, cw, ch);
+  const m = arMode(node);
+  if (m === "off") return c;
+  if (m === "free") {
+    c.w = Math.min(Math.max(c.w, 0.02), 1);
+    c.h = Math.min(Math.max(c.h, 0.02), 1);
+    c.x = Math.min(Math.max(0, c.x), Math.max(0, 1 - c.w));
+    c.y = Math.min(Math.max(0, c.y), Math.max(0, 1 - c.h));
+    return c;
+  }
+  const k = m * (ch / cw);
+  const fr = maxFitRatio(m, cw, ch);
   c.h = Math.min(Math.max(c.h, 0.02), fr.h);
   c.w = c.h * k;
   c.x = Math.min(Math.max(0, c.x), Math.max(0, 1 - c.w));
@@ -266,7 +284,7 @@ function writeCrop(node) {
 
 function initCropFromWidgets(node, cw, ch) {
   const st = getState(node);
-  if (ratioOf(node) == null) {
+  if (arMode(node) === "off") {
     st.crop = null;
     writeCrop(node);
     return;
@@ -409,14 +427,27 @@ function layoutOverlay(node) {
   // the duration is part of the file signature (localStorage key); the
   // block below re-runs once it becomes known
   const dur = videoDuration(v);
-  const key = `${v.src}|${ratioOf(node)}|${cw}x${ch}|${dur.toFixed(3)}`;
+  // captured before st.lastSrc is consumed below
+  const fileChanged = st.lastSrc !== v.src;
+  // per-file AR memory: the aspect_ratio combo resets to its default
+  // ("Original") on a full page reload, losing the selection. When the
+  // widgets carry no crop (the workflow always wins) and the file was
+  // (re)loaded, restore the saved AR BEFORE the key is computed, so the
+  // restored mode is part of the key and this pass is the only one.
+  if (!st.cropFromWorkflow && fileChanged && dur > 0) {
+    const ld = lsLoadForVideo(v);
+    if (ld && ld.ar) {
+      const arw = widgetOf(node, "aspect_ratio");
+      if (arw && String(arw.value) !== ld.ar) arw.value = ld.ar;
+    }
+  }
+  const key = `${v.src}|${arMode(node)}|${cw}x${ch}|${dur.toFixed(3)}`;
   if (st.lastKey !== key) {
     st.lastKey = key;
     // file changed -> the captured assets (thumbnails, waveform) belong to
     // the previous file: drop them so they get re-captured. The very first
     // sighting only records the src (a workflow-loaded trim must survive).
-    // (captured before the block below consumes st.lastSrc)
-    const fileChanged = st.lastSrc !== v.src;
+    // (captured above, before the block below consumes st.lastSrc)
     if (fileChanged) {
       const first = st.lastSrc == null;
       if (dur > 0) st.lastSrc = v.src; // only once the metadata is complete
@@ -454,7 +485,7 @@ function layoutOverlay(node) {
     else if (document.querySelector(`[data-node-id="${node.id}"]`)) chosen = "data-node-id";
     console.log(
       LVRC.TAG, "node", node.id, "file", (v.currentSrc || v.src || "").split("/").pop(),
-      "content", cw + "x" + ch, "ratio", ratioOf(node), "chosen", chosen,
+      "content", cw + "x" + ch, "ratio", arMode(node), "chosen", chosen,
       "parentClass", ((v.parentElement && v.parentElement.className) || "").toString().slice(0, 60)
     );
     if (!st.cropFromWorkflow) {
@@ -463,11 +494,17 @@ function layoutOverlay(node) {
       // this exact file over the default max-fit crop. Only on (re)init or
       // file change - an ASPECT RATIO change is not a file change and must
       // reset the box to the new max fit (spec).
-      const ld = fileChanged && ratioOf(node) != null && dur > 0 ? lsLoadForVideo(v) : null;
+      // the AR was restored above (same record); now the crop box
+      const ld = fileChanged && dur > 0 ? lsLoadForVideo(v) : null;
       const lc = ld && ld.crop;
-      if (lc && lc.w > 0.01 && lc.h > 0.01) {
+      if (lc && lc.w > 0.01 && lc.h > 0.01 && arMode(node) !== "off") {
         st.crop = { x: lc.x, y: lc.y, w: lc.w, h: lc.h };
         fitCrop(node, st.crop, cw, ch);
+        writeCrop(node);
+      } else if (arMode(node) === "free" && fileChanged) {
+        // no saved box for this file: a Free crop starts full-frame
+        // (resetCrop would keep the previous file's box on a file change)
+        st.crop = { x: 0, y: 0, w: 1, h: 1 };
         writeCrop(node);
       } else {
         resetCrop(node, cw, ch);
@@ -480,7 +517,7 @@ function layoutOverlay(node) {
     // also happens when the user only changes the ASPECT RATIO, and the
     // IN/OUT marks must survive that. A changed FILE already resets the
     // trim (see the lastSrc block above).
-  } else if (!st.crop && ratioOf(node) != null) {
+  } else if (!st.crop && arMode(node) !== "off") {
     initCropFromWidgets(node, cw, ch);
   }
 
@@ -493,7 +530,7 @@ function layoutOverlay(node) {
 
   sizeVideoBox(node);
 
-  const { overlay, box, label } = st.dom;
+  const { overlay, box, label, handles } = st.dom;
   const c = st.crop;
   if (!c) {
     overlay.style.display = "none";
@@ -524,6 +561,9 @@ function layoutOverlay(node) {
     const out = evenBox(c.x, c.y, c.x + c.w, c.y + c.h, cw, ch);
     label.textContent = `${out.w} × ${out.h}`;
     label.style.display = box.offsetHeight > 18 ? "" : "none";
+    // corner handles are only useful in Free mode (presets keep their ratio)
+    const free = arMode(node) === "free";
+    if (handles) for (const h of handles) h.style.display = free ? "" : "none";
   }
 
   layoutTimeline(node);
@@ -604,11 +644,26 @@ function buildOverlay(node, v, parent) {
   label.style.cssText =
     "position:absolute;left:4px;top:2px;font:11px monospace;color:#fff;background:rgba(0,0,0,0.8);padding:0 4px;white-space:nowrap;";
   box.appendChild(label);
+  // Free-mode corner handles (shown only while aspect_ratio is Free):
+  // dragging one resizes the box freely, the opposite corner stays fixed
+  const handles = [];
+  for (const corner of ["nw", "ne", "sw", "se"]) {
+    const h = document.createElement("div");
+    h.dataset.lvrcHandle = corner;
+    const pos = corner.startsWith("n") ? "top:-6px" : "bottom:-6px";
+    const hor = corner.endsWith("w") ? "left:-6px" : "right:-6px";
+    h.style.cssText =
+      `position:absolute;box-sizing:border-box;width:12px;height:12px;` +
+      `background:#fff;border:1px solid #ff4040;z-index:1;display:none;` +
+      `${pos};${hor};`; // cursor is set on the overlay via hit-test
+    box.appendChild(h);
+    handles.push(h);
+  }
   overlay.appendChild(box);
 
   parent.appendChild(overlay);
 
-  st.dom = { parent, overlay, box, label, video: v };
+  st.dom = { parent, overlay, box, label, video: v, handles };
   buildTimeline(node, parent); // stores tl/film/wave/... on st.dom
 
   // "Save frame" button: top-left of the video box (the right side is taken
@@ -1354,7 +1409,12 @@ function inRect(x, y, r) {
 function nodeOverBox(n, x, y) {
   const st = n.__lvrc;
   if (!st || !st.dom || !st.dom.box || !st.dom.video || !st.crop) return false;
-  return inRect(x, y, st.dom.box.getBoundingClientRect());
+  let r = st.dom.box.getBoundingClientRect();
+  if (arMode(n) === "free") {
+    // pad so the Free-mode corner handles are grabbable from outside the box
+    r = { left: r.left - 8, top: r.top - 8, right: r.right + 8, bottom: r.bottom + 8 };
+  }
+  return inRect(x, y, r);
 }
 
 /** First node (in graph order) whose crop box contains the point. */
@@ -1394,9 +1454,13 @@ function installDomInterceptors() {
           const v = st.dom.video;
           const nat = videoNatural(v);
           if (!nat) return;
-          const r = ratioOf(n);
-          const fr = maxFitRatio(r, nat.w, nat.h);
           const c = st.crop;
+          if (!c) return;
+          const m = arMode(n);
+          if (m === "off") return;
+          // Free: zoom keeps the box's own (drawn) ratio
+          const r = m === "free" ? (c.w * nat.w) / (c.h * nat.h) : m;
+          const fr = maxFitRatio(r, nat.w, nat.h);
           const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
           let newH = c.h * factor;
           if (newH > fr.h) newH = fr.h;
@@ -1439,8 +1503,20 @@ function installDomInterceptors() {
         if (!nat || !p) return;
         e.preventDefault();
         e.stopPropagation();
-        activeDrag = { node: n, nx: p.nx, ny: p.ny, cx: st.crop.x, cy: st.crop.y, pid: e.pointerId };
-        if (st.dom.overlay) st.dom.overlay.style.cursor = "move";
+        // Free mode: starting on a box corner resizes it (the opposite
+        // corner stays fixed); anywhere else the box moves as before
+        let corner = null;
+        if (arMode(n) === "free" && st.crop) {
+          const r = st.dom.box.getBoundingClientRect();
+          const pts = { nw: [r.left, r.top], ne: [r.right, r.top], sw: [r.left, r.bottom], se: [r.right, r.bottom] };
+          let best = 14; // px threshold around the corner
+          for (const cn of Object.keys(pts)) {
+            const d = Math.hypot(e.clientX - pts[cn][0], e.clientY - pts[cn][1]);
+            if (d < best) { best = d; corner = cn; }
+          }
+        }
+        activeDrag = { node: n, nx: p.nx, ny: p.ny, cx: st.crop.x, cy: st.crop.y, cw: st.crop.w, ch: st.crop.h, corner, pid: e.pointerId };
+        if (st.dom.overlay) st.dom.overlay.style.cursor = corner ? "nwse-resize" : "move";
       } catch (err) {
         console.warn(LVRC.TAG, "pointerdown", err);
       }
@@ -1461,16 +1537,41 @@ function installDomInterceptors() {
           const nat = videoNatural(v);
           const p = contentPosOf(v, e);
           if (!st || !st.crop || !nat || !p) return;
-          st.crop.x = activeDrag.cx + (p.nx - activeDrag.nx);
-          st.crop.y = activeDrag.cy + (p.ny - activeDrag.ny);
-          fitCrop(n, st.crop, nat.w, nat.h);
+          const c = st.crop;
+          if (activeDrag.corner) {
+            // resize: the opposite corner (from the box at drag start) stays
+            // fixed, the box grows/shrinks from it toward the pointer
+            const fx = activeDrag.corner === "nw" || activeDrag.corner === "sw" ? activeDrag.cx + activeDrag.cw : activeDrag.cx;
+            const fy = activeDrag.corner === "nw" || activeDrag.corner === "ne" ? activeDrag.cy + activeDrag.ch : activeDrag.cy;
+            c.x = Math.min(fx, p.nx);
+            c.y = Math.min(fy, p.ny);
+            c.w = Math.abs(p.nx - fx);
+            c.h = Math.abs(p.ny - fy);
+          } else {
+            c.x = activeDrag.cx + (p.nx - activeDrag.nx);
+            c.y = activeDrag.cy + (p.ny - activeDrag.ny);
+          }
+          fitCrop(n, c, nat.w, nat.h);
           writeCrop(n);
           layoutOverlay(n);
           return;
         }
         for (const n of lvrcApp.graph.nodes || []) {
           if (n.type !== LVRC.NODE_NAME || !n.__lvrc || !n.__lvrc.dom || !n.__lvrc.dom.overlay) continue;
-          n.__lvrc.dom.overlay.style.cursor = nodeOverBox(n, e.clientX, e.clientY) ? "move" : "default";
+          let cur = "default";
+          if (nodeOverBox(n, e.clientX, e.clientY)) {
+            cur = "move";
+            if (arMode(n) === "free" && n.__lvrc.crop && n.__lvrc.dom.box) {
+              const r = n.__lvrc.dom.box.getBoundingClientRect();
+              const pts = { nw: [r.left, r.top], ne: [r.right, r.top], sw: [r.left, r.bottom], se: [r.right, r.bottom] };
+              let best = 14;
+              for (const cn of Object.keys(pts)) {
+                const d = Math.hypot(e.clientX - pts[cn][0], e.clientY - pts[cn][1]);
+                if (d < best) { best = d; cur = cn === "nw" || cn === "se" ? "nwse-resize" : "nesw-resize"; }
+              }
+            }
+          }
+          n.__lvrc.dom.overlay.style.cursor = cur;
         }
       } catch (err) {
         console.warn(LVRC.TAG, "pointermove", err);
@@ -1569,6 +1670,7 @@ function initNode(node) {
             if (typeof prev === "function") prev(val);
             layoutOverlay(node);
             markDirty(node);
+            lsSave(node); // keep the per-file memory current (the ar field)
           } catch (err) {
             console.warn(LVRC.TAG, "aspect_ratio callback", err);
           }

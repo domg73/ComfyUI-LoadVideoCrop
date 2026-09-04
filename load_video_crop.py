@@ -31,6 +31,7 @@ except Exception:
 
 ASPECT_RATIOS = [
     "Original",
+    "Free (Custom)",
     "1:1 (Square)",
     "2:3 (Portrait Photo)",
     "3:2 (Photo)",
