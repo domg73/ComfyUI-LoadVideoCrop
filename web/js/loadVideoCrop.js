@@ -1448,10 +1448,13 @@ function installDomInterceptors() {
         for (const n of lvrcApp.graph.nodes || []) {
           if (n.type !== LVRC.NODE_NAME || !n.__lvrc) continue;
           if (!nodeOverBox(n, e.clientX, e.clientY)) continue;
-          e.preventDefault();
-          e.stopPropagation();
           const st = n.__lvrc;
           const v = st.dom.video;
+          // Same guard as pointerdown: don't hijack wheel events that land on
+          // a floating UI element (e.g. a dropdown menu) over the box.
+          if (e.target !== v && !v.contains(e.target)) continue;
+          e.preventDefault();
+          e.stopPropagation();
           const nat = videoNatural(v);
           if (!nat) return;
           const c = st.crop;
@@ -1498,6 +1501,11 @@ function installDomInterceptors() {
         if (!n) return;
         const st = n.__lvrc;
         const v = st.dom.video;
+        // A floating UI layer (widget dropdown menu, save button, ...) can
+        // sit over the box; the overlay is pointer-events:none, so e.target
+        // is the topmost REAL element. Only hijack when the pointer is
+        // really on our <video>.
+        if (e.target !== v && !v.contains(e.target)) return;
         const nat = videoNatural(v);
         const p = contentPosOf(v, e);
         if (!nat || !p) return;

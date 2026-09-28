@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.3 (2026-09-28)
+
+- Fix: widget dropdown menu (aspect-ratio select) and the "Save frame" button are now clickable even when they overlap the crop box. The pointer/wheel handlers no longer hijack events that land on UI elements floating above the video.
+
 ## v1.0.2 (2026-09-04)
 
 - New **Free (Custom)** aspect ratio: a crop rectangle of any shape, not limited to the preset ratios. In Free mode the box keeps the shape you draw:
