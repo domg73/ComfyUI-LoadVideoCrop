@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.4 (2026-09-29)
+
+- New **⏯** toggle button (next to "Save frame") to show/hide the native `<video>` controls. The preference is persisted per file in `localStorage` and restored on reload. Useful when the native controls overlap the crop box during corner-resize.
+- Restored the pointer cursor feedback: the cursor changes to `move` (body drag) or `nwse-resize` / `nesw-resize` (corner handles) while dragging, and returns to default on release.
+
 ## v1.0.3 (2026-09-28)
 
 - Fix: widget dropdown menu (aspect-ratio select) and the "Save frame" button are now clickable even when they overlap the crop box. The pointer/wheel handlers no longer hijack events that land on UI elements floating above the video.

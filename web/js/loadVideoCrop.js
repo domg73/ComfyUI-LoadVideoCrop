@@ -138,6 +138,7 @@ function lsSave(node) {
       crop,
       ar: arw ? String(arw.value) : null, // the combo resets to default on reload
       trim: { start: st.trim.start, dur: st.trim.dur },
+      ctrls: v ? v.controls : true,
       ts: Date.now(),
     }));
     // housekeeping: drop entries older than 7 days so the cache never grows
@@ -477,6 +478,11 @@ function layoutOverlay(node) {
             st.trim = { start: 0, dur: 0 };
           }
           writeTrim(node);
+          // restore native video controls preference
+          if (ld && typeof ld.ctrls === "boolean") {
+            v.controls = ld.ctrls;
+            if (st.dom.ctrlBtn) st.dom.ctrlBtn.style.opacity = v.controls ? "1" : "0.5";
+          }
         }
       }
     }
@@ -688,6 +694,43 @@ function buildOverlay(node, v, parent) {
   });
   parent.appendChild(saveBtn);
   st.dom.saveBtn = saveBtn;
+
+  // Video controls toggle: show/hide the native <video> controls.
+  // The native controls are redundant (we have our own timeline) and can
+  // interfere with crop-box interaction. Persisted per file in localStorage.
+  const ctrlBtn = document.createElement("button");
+  ctrlBtn.dataset.lvrcCtrls = "1";
+  ctrlBtn.type = "button";
+  ctrlBtn.textContent = "\u23EF"; // ⏯
+  ctrlBtn.title = "Toggle native video controls";
+  ctrlBtn.style.cssText =
+    "position:absolute;top:8px;left:82px;z-index:3;pointer-events:auto;" +
+    "background:rgba(0,0,0,0.6);color:#fff;border:1px solid rgba(255,255,255,0.35);" +
+    "border-radius:4px;padding:2px 8px;font:12px sans-serif;cursor:pointer;";
+  ctrlBtn.addEventListener("pointerdown", (e) => { e.stopPropagation(); });
+  ctrlBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const vv = st.dom.video;
+    if (vv) {
+      vv.controls = !vv.controls;
+      ctrlBtn.style.opacity = vv.controls ? "1" : "0.5";
+      // persist
+      try {
+        const key = lsKeyOfVideo(vv);
+        if (key) {
+          const raw = localStorage.getItem(key);
+          const s = raw ? JSON.parse(raw) : {};
+          if (s && typeof s.trim === "object" && s.trim !== null) {
+            s.ctrls = vv.controls;
+            localStorage.setItem(key, JSON.stringify(s));
+          }
+        }
+      } catch (_) { /* best-effort */ }
+    }
+  });
+  ctrlBtn.style.opacity = v.controls ? "1" : "0.5";
+  parent.appendChild(ctrlBtn);
+  st.dom.ctrlBtn = ctrlBtn;
 
   // Reuse the already-captured assets (same file only): move the finished
   // thumbnail <img>s into the new filmstrip and redraw the waveform, so a
@@ -1524,7 +1567,7 @@ function installDomInterceptors() {
           }
         }
         activeDrag = { node: n, nx: p.nx, ny: p.ny, cx: st.crop.x, cy: st.crop.y, cw: st.crop.w, ch: st.crop.h, corner, pid: e.pointerId };
-        if (st.dom.overlay) st.dom.overlay.style.cursor = corner ? "nwse-resize" : "move";
+        if (v) v.style.cursor = corner ? (corner === "nw" || corner === "se" ? "nwse-resize" : "nesw-resize") : "move";
       } catch (err) {
         console.warn(LVRC.TAG, "pointerdown", err);
       }
@@ -1579,7 +1622,7 @@ function installDomInterceptors() {
               }
             }
           }
-          n.__lvrc.dom.overlay.style.cursor = cur;
+          if (n.__lvrc.dom.video) n.__lvrc.dom.video.style.cursor = cur;
         }
       } catch (err) {
         console.warn(LVRC.TAG, "pointermove", err);
@@ -1605,7 +1648,7 @@ function installDomInterceptors() {
         writeCrop(n);
         lsSave(n); // remember for tab switches / reloads
       }
-      if (st && st.dom && st.dom.overlay) st.dom.overlay.style.cursor = "default";
+      if (v) v.style.cursor = ""; // release: let CSS cascade decide
       activeDrag = null;
     } catch (err) {
       console.warn(LVRC.TAG, "pointerup", err);

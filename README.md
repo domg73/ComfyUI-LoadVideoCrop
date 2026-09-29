@@ -42,6 +42,10 @@ The **💾 Frame** button (top-left of the preview) saves the current frame as P
 
 The same frame is also available in the graph as the two IMAGE outputs (see above), so it can be fed to other nodes instead of the browser download.
 
+### Video controls toggle
+
+The **⏯** button (next to the Frame button) shows/hides the native `<video>` controls (play/pause bar, seek, volume). The native controls are redundant — the node has its own trim timeline — and can interfere with crop-box interaction when they overlap the box during a corner-resize. The preference is persisted per file in `localStorage` and restored on reload.
+
 The timeline is display-only: it is sized to the node width and reflows as you resize the node (thumbnails stretch, the waveform re-samples, the marks stay at their exact times). It never changes what the backend does — it just edits the same `start_time` / `duration` values.
 
 Semantics match the core **Trim Video** node: `start_time` in seconds (a negative value counts from the end), `duration` in seconds (`0` = until the end of the clip), `strict_duration` (`false`: if the remaining clip is shorter, the trim is clamped to the end; `true`: the node fails instead). The three values are stored in the workflow via the hidden `start_time` / `duration` / `strict_duration` inputs, so they can be set from an API script. The trim works in combination with the crop: the output contains only the selected window, with every frame cropped.
